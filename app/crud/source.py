@@ -2,7 +2,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models.source import Source
-from app.schemas.source import SourceCreate, SourceUpdate
+from app.schemas.source import SOURCE_API_PATH_MAP, SourceCreate, SourceUpdate
 
 
 def get_source(db: Session, source_id: int) -> Source | None:
@@ -22,7 +22,7 @@ def list_sources(db: Session, active_only: bool = False) -> list[Source]:
 
 
 def create_source(db: Session, source_in: SourceCreate) -> Source:
-    source = Source(**source_in.model_dump())
+    source = Source(**source_in.model_dump(), api_path=SOURCE_API_PATH_MAP[source_in.source_type])
     db.add(source)
     db.commit()
     db.refresh(source)

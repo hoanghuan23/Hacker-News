@@ -1,39 +1,26 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 SOURCE_API_PATH_MAP: dict[str, str] = {
     "news": "topstories.json",
-    "new": "newstories.json",
+    "newest": "newstories.json",
     "best": "beststories.json",
     "ask": "askstories.json",
     "show": "showstories.json",
     "jobs": "jobstories.json",
 }
 
-
-class SourceBase(BaseModel):
-    source_type: str
-    api_path: str
-
-    @model_validator(mode="after")
-    def validate_source_mapping(self) -> "SourceBase":
-        expected_api_path = SOURCE_API_PATH_MAP.get(self.source_type)
-        if expected_api_path is None:
-            allowed = ", ".join(sorted(SOURCE_API_PATH_MAP))
-            raise ValueError(f"source_type must be one of: {allowed}")
-        if self.api_path != expected_api_path:
-            raise ValueError(f"api_path for source_type '{self.source_type}' must be '{expected_api_path}'")
-        return self
+SourceType = Literal["news", "newest", "best", "ask", "show", "jobs"]
 
 
-class SourceCreate(SourceBase):
+class SourceCreate(BaseModel):
+    source_type: SourceType
     include_comments: bool = False
     comment_max_depth: int = Field(default=2, ge=0)
     max_days_old: int = Field(default=1, ge=1)
-    schedule_override_minutes: int | None = Field(default=None, ge=1)
 
 
 class SourceUpdate(BaseModel):

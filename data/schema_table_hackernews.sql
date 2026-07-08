@@ -27,7 +27,7 @@ CREATE TABLE sources (
 
     -- Theo tab / nhóm dữ liệu của Hacker News
     -- news  -> topstories.json
-    -- new   -> newstories.json
+    -- newest -> newstories.json
     -- best  -> beststories.json
     -- ask   -> askstories.json
     -- show  -> showstories.json
@@ -55,7 +55,7 @@ CREATE TABLE sources (
     CONSTRAINT ck_hn_source_type CHECK (
         source_type IN (
             'news',
-            'new',
+            'newest',
             'best',
             'ask',
             'show',

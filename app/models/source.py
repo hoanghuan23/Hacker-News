@@ -11,7 +11,7 @@ class Source(Base):
     __tablename__ = "sources"
     __table_args__ = (
         CheckConstraint(
-            "source_type IN ('news', 'new', 'best', 'ask', 'show', 'jobs')",
+            "source_type IN ('news', 'newest', 'best', 'ask', 'show', 'jobs')",
             name="ck_hn_source_type",
         ),
         CheckConstraint(

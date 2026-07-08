@@ -8,14 +8,15 @@ from sqlalchemy.orm import Session
 
 from app.crud import source as source_crud
 from app.models.source import Source
-from app.schemas.source import SourceCreate, SourceUpdate
+from app.schemas.source import SOURCE_API_PATH_MAP, SourceCreate, SourceUpdate
 from app.services.hackernews_client import HackerNewsClient
 
 logger = logging.getLogger(__name__)
 
 
 def create_source(db: Session, source_in: SourceCreate) -> Source:
-    existing = source_crud.get_source_by_type_or_path(db, source_in.source_type, source_in.api_path)
+    api_path = SOURCE_API_PATH_MAP[source_in.source_type]
+    existing = source_crud.get_source_by_type_or_path(db, source_in.source_type, api_path)
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Source already exists")
     try:
