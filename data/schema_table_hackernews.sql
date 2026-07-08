@@ -95,7 +95,6 @@ CREATE TABLE posts (
 
     posted_at DATETIME NOT NULL,          -- map từ time
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME,
 
     is_tracked BOOLEAN DEFAULT 1,
     tracking_until DATETIME,

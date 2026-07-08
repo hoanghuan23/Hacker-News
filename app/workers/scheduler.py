@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.database import SessionLocal
+from app.models.post import Post, PostSource
 from app.models.source import Source
 from app.services.hackernews_client import HackerNewsClient
 from app.services.hackernews_ingestion import fetch_recent_source_items, upsert_source_posts
@@ -48,6 +49,17 @@ def _get_due_sources(db: Session, now: datetime, limit: int) -> list[Source]:
     return list(db.scalars(statement).all())
 
 
+def _get_latest_source_posted_at(db: Session, source_id: int) -> datetime | None:
+    statement = (
+        select(Post.posted_at)
+        .join(PostSource, PostSource.post_id == Post.id)
+        .where(PostSource.source_id == source_id)
+        .order_by(Post.posted_at.desc())
+        .limit(1)
+    )
+    return db.scalars(statement).first()
+
+
 def scrape_due_sources(
     db: Session,
     client: HackerNewsClient | None = None,
@@ -65,7 +77,13 @@ def scrape_due_sources(
     for source in sources:
         job = start_pipeline_job(db, "scrape_posts", source_id=source.id, started_at=scan_time)
         try:
-            items = fetch_recent_source_items(hn_client, source.api_path, source.max_days_old)
+            latest_posted_at = _get_latest_source_posted_at(db, source.id)
+            items = fetch_recent_source_items(
+                hn_client,
+                source.api_path,
+                source.max_days_old,
+                latest_posted_at=latest_posted_at,
+            )
             result["posts_found"] += len(items)
             posts_updated = upsert_source_posts(db, source, items, job_id=job.id)
             source.next_scrape = _next_source_scrape_at(source, scan_time, retry_interval_seconds)

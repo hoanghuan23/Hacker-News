@@ -8,7 +8,7 @@ import app.models  # noqa: F401
 from app.database import Base
 from app.models.metric import PostMetric
 from app.models.pipeline import PipelineJob, PipelineLog
-from app.models.post import Post
+from app.models.post import Post, PostSource
 from app.models.source import Source
 from app.workers.scheduler import run_scheduler_tick
 
@@ -29,6 +29,16 @@ class FakeHackerNewsClient:
         if isinstance(item, Exception):
             raise item
         return item
+
+
+class RecordingHackerNewsClient(FakeHackerNewsClient):
+    def __init__(self, items=None, story_ids=None, story_id_error=None):
+        super().__init__(items=items, story_ids=story_ids, story_id_error=story_id_error)
+        self.requested_item_ids = []
+
+    def get_item(self, item_id):
+        self.requested_item_ids.append(item_id)
+        return super().get_item(item_id)
 
 
 def make_session() -> Session:
@@ -142,6 +152,65 @@ def test_scheduler_tick_scrapes_due_sources_and_skips_null_next_scrape():
     assert source_job.posts_new == 1
     assert metric.job_id == source_job.id
     assert db.scalars(select(Post).where(Post.hn_post_id == 20)).first() is None
+
+
+def test_scheduler_tick_stops_newstories_crawl_at_latest_posted_at():
+    db = make_session()
+    now = datetime.now(timezone.utc)
+    source = Source(
+        source_type="newest",
+        api_path="newstories.json",
+        is_active=True,
+        is_accessible=True,
+        max_days_old=1,
+        next_scrape=now - timedelta(seconds=1),
+    )
+    latest_post = Post(
+        hn_post_id=100,
+        posted_at=now - timedelta(minutes=5),
+        title="Already crawled",
+    )
+    db.add_all([source, latest_post])
+    db.commit()
+    db.add(PostSource(post_id=latest_post.id, source_id=source.id))
+    db.commit()
+
+    client = RecordingHackerNewsClient(
+        story_ids={"newstories.json": [101, 100, 99]},
+        items={
+            101: {
+                "id": 101,
+                "type": "story",
+                "title": "Fresh story",
+                "time": int((now - timedelta(minutes=1)).timestamp()),
+                "score": 10,
+                "descendants": 1,
+            },
+            100: {
+                "id": 100,
+                "type": "story",
+                "title": "Already crawled",
+                "time": int((now - timedelta(minutes=5)).timestamp()),
+                "score": 5,
+                "descendants": 0,
+            },
+            99: {
+                "id": 99,
+                "type": "story",
+                "title": "Should not be fetched",
+                "time": int((now - timedelta(minutes=10)).timestamp()),
+                "score": 1,
+                "descendants": 0,
+            },
+        },
+    )
+
+    result = run_scheduler_tick(db, client=client, now=now, interval_seconds=120)
+
+    assert client.requested_item_ids == [101, 100]
+    assert result["sources"]["posts_found"] == 1
+    assert db.scalars(select(Post).where(Post.hn_post_id == 101)).one()
+    assert db.scalars(select(Post).where(Post.hn_post_id == 99)).first() is None
 
 
 def test_scheduler_tick_uses_source_schedule_override_minutes():

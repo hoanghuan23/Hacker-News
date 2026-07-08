@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -14,28 +14,46 @@ from app.utils.datetime_utils import from_unix_timestamp, utc_now
 
 SUPPORTED_POST_TYPES = {"story", "job", "poll"}
 HN_ITEM_BASE_URL = "https://news.ycombinator.com/item?id="
+STOP_AT_LATEST_API_PATHS = {"newstories.json"}
+
+
+def _as_utc_naive(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def fetch_recent_source_items(
     client: HackerNewsClient,
     api_path: str,
     max_days_old: int,
+    latest_posted_at: datetime | None = None,
 ) -> list[dict[str, Any]]:
     story_ids = client.get_story_ids(api_path)
     earliest_time = utc_now() - timedelta(days=max_days_old)
+    should_stop_at_latest = api_path in STOP_AT_LATEST_API_PATHS and latest_posted_at is not None
+    latest_cutoff = _as_utc_naive(latest_posted_at) if latest_posted_at is not None else None
     items: list[dict[str, Any]] = []
 
     for story_id in story_ids:
         item = client.get_item(story_id)
         if not item:
             continue
+        posted_at = from_unix_timestamp(item.get("time"))
+        if posted_at is None:
+            continue
+        if (
+            should_stop_at_latest
+            and latest_cutoff is not None
+            and _as_utc_naive(posted_at) <= latest_cutoff
+        ):
+            break
         if item.get("deleted") or item.get("dead"):
             continue
         if item.get("type") not in SUPPORTED_POST_TYPES:
             continue
 
-        posted_at = from_unix_timestamp(item.get("time"))
-        if posted_at is None or posted_at < earliest_time:
+        if posted_at < earliest_time:
             continue
 
         items.append(item)
@@ -69,7 +87,6 @@ def upsert_source_posts(
         post.hn_item_url = f"{HN_ITEM_BASE_URL}{hn_post_id}"
         post.author = item.get("by")
         post.posted_at = posted_at
-        post.updated_at = now
         post.is_deleted = bool(item.get("deleted", False))
         post.is_dead = bool(item.get("dead", False))
 

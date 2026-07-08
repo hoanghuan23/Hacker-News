@@ -27,7 +27,6 @@ class Post(Base):
     author: Mapped[str | None] = mapped_column(String(100))
     posted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.current_timestamp())
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
     is_tracked: Mapped[bool] = mapped_column(Boolean, default=True)
     tracking_until: Mapped[datetime | None] = mapped_column(DateTime)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
