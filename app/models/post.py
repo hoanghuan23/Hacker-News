@@ -25,8 +25,6 @@ class Post(Base):
     url: Mapped[str | None] = mapped_column(Text)
     hn_item_url: Mapped[str | None] = mapped_column(Text)
     author: Mapped[str | None] = mapped_column(String(100))
-    score: Mapped[int] = mapped_column(Integer, default=0)
-    comment_count: Mapped[int] = mapped_column(Integer, default=0)
     posted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.current_timestamp())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime)
@@ -40,7 +38,6 @@ class Post(Base):
     last_engagement_velocity: Mapped[float | None] = mapped_column(Float)
     cold_check_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     metric_scan_miss_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    raw_json: Mapped[str | None] = mapped_column(Text)
 
 
 class PostSource(Base):

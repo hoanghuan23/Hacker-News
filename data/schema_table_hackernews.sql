@@ -1,6 +1,6 @@
 -- Schema cho Hacker News crawler
 -- Hacker News không cần session/cookie/login, nên bỏ bảng tiktok_sessions.
--- Hacker News không có views/likes/shares/bookmarks, chỉ có score và descendants/comment_count.
+-- Hacker News không có views/likes/shares/bookmarks; score và descendants/comment_count nằm trong bảng metrics.
 
 PRAGMA foreign_keys = ON;
 
@@ -93,9 +93,6 @@ CREATE TABLE posts (
     hn_item_url TEXT,
     author VARCHAR(100),
 
-    score INTEGER DEFAULT 0,
-    comment_count INTEGER DEFAULT 0,      -- map từ descendants
-
     posted_at DATETIME NOT NULL,          -- map từ time
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME,
@@ -110,9 +107,7 @@ CREATE TABLE posts (
     metric_tier VARCHAR(20) NOT NULL DEFAULT 'bootstrap',
     last_engagement_velocity FLOAT,
     cold_check_count INTEGER NOT NULL DEFAULT 0,
-    metric_scan_miss_count INTEGER NOT NULL DEFAULT 0,
-
-    raw_json TEXT
+    metric_scan_miss_count INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX ix_posts_hn_post_id ON posts (hn_post_id);
 CREATE INDEX idx_posts_posted_at ON posts (posted_at);

@@ -1,4 +1,3 @@
-import json
 from datetime import timedelta
 from typing import Any
 
@@ -63,14 +62,11 @@ def upsert_source_posts(db: Session, source: Source, items: list[dict[str, Any]]
         post.url = item.get("url")
         post.hn_item_url = f"{HN_ITEM_BASE_URL}{hn_post_id}"
         post.author = item.get("by")
-        post.score = item.get("score") or 0
-        post.comment_count = item.get("descendants") or 0
         post.posted_at = posted_at
         post.updated_at = now
         post.is_deleted = bool(item.get("deleted", False))
         post.is_dead = bool(item.get("dead", False))
         post.last_metric_update = now
-        post.raw_json = json.dumps(item)
 
         db.flush()
 
@@ -80,7 +76,14 @@ def upsert_source_posts(db: Session, source: Source, items: list[dict[str, Any]]
             db.add(post_source)
         post_source.last_seen_at = now
 
-        db.add(PostMetric(post_id=post.id, score=post.score, comment_count=post.comment_count, recorded_at=now))
+        db.add(
+            PostMetric(
+                post_id=post.id,
+                score=item.get("score") or 0,
+                comment_count=item.get("descendants") or 0,
+                recorded_at=now,
+            )
+        )
         updated_count += 1
 
     source.last_scraped = now
