@@ -1,0 +1,22 @@
+from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator
+
+from fastapi import FastAPI
+
+from app.api.routes import health, sources
+from app.core.logging_config import configure_logging
+from app.database import Base, engine
+import app.models  # noqa: F401
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    Base.metadata.create_all(bind=engine)
+    yield
+
+
+configure_logging()
+
+app = FastAPI(title="Hacker News API", lifespan=lifespan)
+app.include_router(health.router)
+app.include_router(sources.router)
