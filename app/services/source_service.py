@@ -38,7 +38,7 @@ def create_source(
         logger.info("Duplicate source rejected by database: %s", exc)
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Source already exists") from exc
     upsert_source_posts(db, source, items)
-    return source
+    return source_crud.refresh_next_scrape_from_last_scraped(db, source)
 
 
 def list_sources(db: Session, active_only: bool = False) -> list[Source]:
