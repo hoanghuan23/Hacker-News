@@ -23,7 +23,7 @@ CREATE INDEX idx_task_logs_name_date ON task_logs (task_name, created_at);
 -- source_type:
 --   topstories/newstories/beststories/askstories/showstories/jobstories: lấy từ Firebase API
 CREATE TABLE sources (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER PRIMARY KEY,
 
     -- Theo tab / nhóm dữ liệu của Hacker News
     -- news  -> topstories.json
@@ -90,12 +90,11 @@ CREATE TABLE posts (
 
     title TEXT,
     url TEXT,
-    text TEXT,
+    hn_item_url TEXT,
     author VARCHAR(100),
 
     score INTEGER DEFAULT 0,
     comment_count INTEGER DEFAULT 0,      -- map từ descendants
-    kids_json TEXT,                       -- lưu danh sách kids nếu cần debug/update comment
 
     posted_at DATETIME NOT NULL,          -- map từ time
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -167,7 +166,6 @@ CREATE TABLE comments (
 
     is_deleted BOOLEAN DEFAULT 0,
     is_dead BOOLEAN DEFAULT 0,
-    kids_json TEXT,
 
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,

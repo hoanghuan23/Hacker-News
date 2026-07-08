@@ -29,7 +29,6 @@ class Comment(Base):
     posted_at: Mapped[datetime | None] = mapped_column(DateTime)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
     is_dead: Mapped[bool] = mapped_column(Boolean, default=False)
-    kids_json: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.current_timestamp())
     last_updated: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.current_timestamp())
     raw_json: Mapped[str | None] = mapped_column(Text)
