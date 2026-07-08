@@ -8,6 +8,7 @@ from app.models.metric import PostMetric
 from app.models.post import Post, PostSource
 from app.models.source import Source
 from app.services.hackernews_client import HackerNewsClient
+from app.services.post_metric_service import apply_metric_schedule
 from app.utils.datetime_utils import from_unix_timestamp, utc_now
 
 
@@ -66,7 +67,6 @@ def upsert_source_posts(db: Session, source: Source, items: list[dict[str, Any]]
         post.updated_at = now
         post.is_deleted = bool(item.get("deleted", False))
         post.is_dead = bool(item.get("dead", False))
-        post.last_metric_update = now
 
         db.flush()
 
@@ -76,11 +76,14 @@ def upsert_source_posts(db: Session, source: Source, items: list[dict[str, Any]]
             db.add(post_source)
         post_source.last_seen_at = now
 
+        score = item.get("score") or 0
+        comment_count = item.get("descendants") or 0
+        apply_metric_schedule(post, score, comment_count, now)
         db.add(
             PostMetric(
                 post_id=post.id,
-                score=item.get("score") or 0,
-                comment_count=item.get("descendants") or 0,
+                score=score,
+                comment_count=comment_count,
                 recorded_at=now,
             )
         )
