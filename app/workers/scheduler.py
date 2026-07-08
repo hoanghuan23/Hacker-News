@@ -27,6 +27,9 @@ SessionFactory = Callable[[], Session]
 def _next_source_scrape_at(source: Source, now: datetime, interval_seconds: int) -> datetime:
     if source.schedule_override_minutes is not None:
         return now + timedelta(minutes=source.schedule_override_minutes)
+    interval_minutes = settings.SOURCE_CRAWL_INTERVAL_MINUTES.get(source.source_type)
+    if interval_minutes is not None:
+        return now + timedelta(minutes=interval_minutes)
     return now + timedelta(seconds=interval_seconds)
 
 

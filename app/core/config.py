@@ -9,6 +9,14 @@ class Settings(BaseSettings):
     HACKERNEWS_TIMEOUT_SECONDS: int = 20
     SCHEDULER_ENABLED: bool = True
     SCHEDULER_INTERVAL_SECONDS: int = 120
+    SOURCE_CRAWL_INTERVAL_MINUTES: dict[str, int] = {
+        "news": 15,
+        "newest": 25,
+        "best": 30,
+        "ask": 45,
+        "show": 50,
+        "jobs": 60,
+    }
     METRICS_UPDATE_LIMIT: int = 100
     SOURCE_SCRAPE_LIMIT: int = 10
     SERVICE_NAME: str = "hackernews-api"
