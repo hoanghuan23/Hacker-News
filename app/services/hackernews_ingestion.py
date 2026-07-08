@@ -43,7 +43,12 @@ def fetch_recent_source_items(
     return items
 
 
-def upsert_source_posts(db: Session, source: Source, items: list[dict[str, Any]]) -> int:
+def upsert_source_posts(
+    db: Session,
+    source: Source,
+    items: list[dict[str, Any]],
+    job_id: int | None = None,
+) -> int:
     now = utc_now()
     updated_count = 0
 
@@ -85,6 +90,7 @@ def upsert_source_posts(db: Session, source: Source, items: list[dict[str, Any]]
                 score=score,
                 comment_count=comment_count,
                 recorded_at=now,
+                job_id=job_id,
             )
         )
         updated_count += 1

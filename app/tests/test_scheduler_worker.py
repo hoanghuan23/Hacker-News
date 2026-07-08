@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, sessionmaker
 import app.models  # noqa: F401
 from app.database import Base
 from app.models.metric import PostMetric
+from app.models.pipeline import PipelineJob, PipelineLog
 from app.models.post import Post
 from app.models.source import Source
 from app.workers.scheduler import run_scheduler_tick
@@ -68,7 +69,13 @@ def test_scheduler_tick_updates_due_post_metrics_and_skips_future_posts():
     assert result["metrics"] == {"items_total": 1, "items_updated": 1, "items_failed": 0}
     assert due_post.metric_tier == "viral"
     assert future_post.last_metric_update is None
-    assert db.scalars(select(PostMetric).where(PostMetric.post_id == due_post.id)).one().score == 300
+    metric = db.scalars(select(PostMetric).where(PostMetric.post_id == due_post.id)).one()
+    metric_job = db.scalars(select(PipelineJob).where(PipelineJob.job_type == "update_metrics")).one()
+    assert metric.score == 300
+    assert metric.job_id == metric_job.id
+    assert metric_job.status == "done"
+    assert metric_job.items_total == 1
+    assert metric_job.items_updated == 1
 
 
 def test_scheduler_tick_scrapes_due_sources_and_skips_null_next_scrape():
@@ -125,7 +132,15 @@ def test_scheduler_tick_scrapes_due_sources_and_skips_null_next_scrape():
     assert result["sources"]["sources_scraped"] == 1
     assert due_source.next_scrape == (now + timedelta(seconds=120)).replace(tzinfo=None)
     assert null_source.next_scrape is None
-    assert db.scalars(select(Post).where(Post.hn_post_id == 10)).one().title == "Due source story"
+    post = db.scalars(select(Post).where(Post.hn_post_id == 10)).one()
+    source_job = db.scalars(select(PipelineJob).where(PipelineJob.job_type == "scrape_posts")).one()
+    metric = db.scalars(select(PostMetric).where(PostMetric.post_id == post.id)).one()
+    assert post.title == "Due source story"
+    assert source_job.source_id == due_source.id
+    assert source_job.status == "done"
+    assert source_job.posts_found == 1
+    assert source_job.posts_new == 1
+    assert metric.job_id == source_job.id
     assert db.scalars(select(Post).where(Post.hn_post_id == 20)).first() is None
 
 
@@ -177,5 +192,12 @@ def test_scheduler_tick_retries_source_after_hackernews_failure():
     )
 
     db.refresh(source)
+    source_job = db.scalars(select(PipelineJob).where(PipelineJob.job_type == "scrape_posts")).one()
+    log = db.scalars(select(PipelineLog).where(PipelineLog.job_id == source_job.id)).one()
     assert result["sources"]["sources_failed"] == 1
     assert source.next_scrape == (now + timedelta(seconds=120)).replace(tzinfo=None)
+    assert source_job.source_id == source.id
+    assert source_job.status == "failed"
+    assert source_job.error_message == "temporary failure"
+    assert log.source_id == source.id
+    assert log.error_type == "RequestException"

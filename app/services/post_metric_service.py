@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models.metric import PostMetric
 from app.models.post import Post
+from app.services.pipeline_service import add_pipeline_log, finish_pipeline_job, start_pipeline_job
 from app.services.hackernews_client import HackerNewsClient
 from app.utils.datetime_utils import utc_now
 
@@ -51,6 +52,7 @@ def update_due_post_metrics(
     limit: int = 100,
 ) -> dict[str, int]:
     now = utc_now()
+    job = start_pipeline_job(db, "update_metrics", started_at=now)
     hn_client = client or HackerNewsClient()
     statement = (
         select(Post)
@@ -61,32 +63,77 @@ def update_due_post_metrics(
     posts = list(db.scalars(statement).all())
     result = {"items_total": len(posts), "items_updated": 0, "items_failed": 0}
 
-    for post in posts:
-        try:
-            item = hn_client.get_item(post.hn_post_id)
-        except requests.RequestException:
-            result["items_failed"] += 1
-            continue
-        if not _is_valid_metric_item(item):
-            result["items_failed"] += 1
-            continue
+    try:
+        for post in posts:
+            try:
+                item = hn_client.get_item(post.hn_post_id)
+            except requests.RequestException as exc:
+                result["items_failed"] += 1
+                add_pipeline_log(
+                    db,
+                    job_id=job.id,
+                    message=f"Metric update request failed for post_id={post.id}",
+                    error_type=type(exc).__name__,
+                    error_details=str(exc),
+                )
+                continue
+            if not _is_valid_metric_item(item):
+                result["items_failed"] += 1
+                add_pipeline_log(
+                    db,
+                    job_id=job.id,
+                    message=f"Metric update returned invalid item for post_id={post.id}",
+                    log_level="WARNING",
+                    error_details=repr(item),
+                )
+                continue
 
-        post.is_deleted = bool(item.get("deleted", False))
-        post.is_dead = bool(item.get("dead", False))
-        if post.is_deleted or post.is_dead:
-            result["items_failed"] += 1
+            post.is_deleted = bool(item.get("deleted", False))
+            post.is_dead = bool(item.get("dead", False))
+            if post.is_deleted or post.is_dead:
+                result["items_failed"] += 1
+                db.add(post)
+                add_pipeline_log(
+                    db,
+                    job_id=job.id,
+                    message=f"Metric update skipped deleted/dead post_id={post.id}",
+                    log_level="WARNING",
+                    error_details=repr(item),
+                )
+                continue
+
+            score = item.get("score") or 0
+            comment_count = item.get("descendants") or 0
+            apply_metric_schedule(post, score, comment_count, now)
+            db.add(
+                PostMetric(
+                    post_id=post.id,
+                    score=score,
+                    comment_count=comment_count,
+                    recorded_at=now,
+                    job_id=job.id,
+                )
+            )
             db.add(post)
-            continue
+            result["items_updated"] += 1
 
-        score = item.get("score") or 0
-        comment_count = item.get("descendants") or 0
-        apply_metric_schedule(post, score, comment_count, now)
-        db.add(PostMetric(post_id=post.id, score=score, comment_count=comment_count, recorded_at=now))
-        db.add(post)
-        result["items_updated"] += 1
-
-    db.commit()
-    return result
+        finish_pipeline_job(job, "done", **result)
+        db.commit()
+        return result
+    except Exception as exc:
+        db.rollback()
+        job = db.get(type(job), job.id)
+        if job is not None:
+            add_pipeline_log(
+                db,
+                job_id=job.id,
+                message="Metric update job failed",
+                error_type=type(exc).__name__,
+                error_details=str(exc),
+            )
+            finish_pipeline_job(job, "failed", error_message=str(exc), **result)
+            db.commit()
+        raise
 
 
 def _is_valid_metric_item(item: Any) -> bool:

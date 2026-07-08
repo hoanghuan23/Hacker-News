@@ -14,6 +14,7 @@ from app.database import SessionLocal
 from app.models.source import Source
 from app.services.hackernews_client import HackerNewsClient
 from app.services.hackernews_ingestion import fetch_recent_source_items, upsert_source_posts
+from app.services.pipeline_service import add_pipeline_log, finish_pipeline_job, start_pipeline_job
 from app.services.post_metric_service import update_due_post_metrics
 from app.utils.datetime_utils import utc_now
 
@@ -59,23 +60,51 @@ def scrape_due_sources(
     result = {"sources_total": len(sources), "sources_scraped": 0, "sources_failed": 0, "posts_found": 0}
 
     for source in sources:
+        job = start_pipeline_job(db, "scrape_posts", source_id=source.id, started_at=scan_time)
         try:
             items = fetch_recent_source_items(hn_client, source.api_path, source.max_days_old)
             result["posts_found"] += len(items)
-            upsert_source_posts(db, source, items)
+            posts_updated = upsert_source_posts(db, source, items, job_id=job.id)
             source.next_scrape = _next_source_scrape_at(source, scan_time, retry_interval_seconds)
             db.add(source)
+            finish_pipeline_job(
+                job,
+                "done",
+                posts_found=len(items),
+                posts_new=posts_updated,
+                items_total=len(items),
+                items_updated=posts_updated,
+            )
             db.commit()
             result["sources_scraped"] += 1
-        except requests.RequestException:
+        except requests.RequestException as exc:
             db.rollback()
             source.next_scrape = _next_source_scrape_at(source, scan_time, retry_interval_seconds)
             db.add(source)
+            add_pipeline_log(
+                db,
+                job_id=job.id,
+                source_id=source.id,
+                message=f"Hacker News source scrape failed for source_id={source.id}",
+                error_type=type(exc).__name__,
+                error_details=str(exc),
+            )
+            finish_pipeline_job(job, "failed", error_message=str(exc))
             db.commit()
             result["sources_failed"] += 1
             logger.exception("Hacker News source scrape failed for source_id=%s", source.id)
-        except Exception:
+        except Exception as exc:
             db.rollback()
+            add_pipeline_log(
+                db,
+                job_id=job.id,
+                source_id=source.id,
+                message=f"Unexpected source scrape failure for source_id={source.id}",
+                error_type=type(exc).__name__,
+                error_details=str(exc),
+            )
+            finish_pipeline_job(job, "failed", error_message=str(exc))
+            db.commit()
             result["sources_failed"] += 1
             logger.exception("Unexpected source scrape failure for source_id=%s", source.id)
 
@@ -125,8 +154,7 @@ async def run_scheduler(
     logger.info("Scheduler started with interval_seconds=%s", sleep_seconds)
     while True:
         try:
-            result = await asyncio.to_thread(run_scheduler_once, session_factory)
-            logger.info("Scheduler tick completed: %s", result)
+            await asyncio.to_thread(run_scheduler_once, session_factory)
         except asyncio.CancelledError:
             raise
         except Exception:

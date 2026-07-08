@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, sessionmaker
 import app.models  # noqa: F401
 from app.database import Base
 from app.models.metric import PostMetric
+from app.models.pipeline import PipelineJob, PipelineLog
 from app.models.post import Post
 from app.models.source import Source
 from app.services.hackernews_ingestion import upsert_source_posts
@@ -128,4 +129,14 @@ def test_update_due_post_metrics_updates_only_due_posts_and_recomputes_tier():
     assert future_post.last_metric_update is None
     assert future_post.metric_tier == "very_low"
     assert missing_post.last_metric_update is None
-    assert db.scalars(select(PostMetric).where(PostMetric.post_id == due_post.id)).one().score == 300
+    metric = db.scalars(select(PostMetric).where(PostMetric.post_id == due_post.id)).one()
+    job = db.scalars(select(PipelineJob).where(PipelineJob.job_type == "update_metrics")).one()
+    log = db.scalars(select(PipelineLog).where(PipelineLog.job_id == job.id)).one()
+    assert metric.score == 300
+    assert metric.job_id == job.id
+    assert job.status == "done"
+    assert job.items_total == 2
+    assert job.items_updated == 1
+    assert job.items_failed == 1
+    assert log.log_level == "ERROR"
+    assert log.error_type == "RequestException"
