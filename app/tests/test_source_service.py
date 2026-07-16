@@ -1,10 +1,12 @@
 from datetime import datetime, timedelta
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.models  # noqa: F401
 from app.database import Base
+from app.models.metric import PostMetric
+from app.models.pipeline import PipelineJob
 from app.models.source import Source
 from app.schemas.source import SourceCreate, SourceUpdate
 from app.services.source_service import create_source, update_source
@@ -74,7 +76,7 @@ def test_update_source_clearing_schedule_override_recomputes_next_scrape_from_co
 
 def test_create_source_sets_next_scrape_from_config_after_initial_scrape():
     db = make_session()
-    item_time = int(datetime(2026, 7, 8, 9, 48, 20).timestamp())
+    item_time = int(datetime.now().timestamp())
 
     source = create_source(
         db,
@@ -96,3 +98,10 @@ def test_create_source_sets_next_scrape_from_config_after_initial_scrape():
 
     assert source.last_scraped is not None
     assert source.next_scrape == source.last_scraped + timedelta(minutes=15)
+    job = db.scalars(select(PipelineJob).where(PipelineJob.source_id == source.id)).one()
+    metric = db.scalars(select(PostMetric).where(PostMetric.job_id == job.id)).one()
+    assert job.job_type == "scrape_posts"
+    assert job.status == "done"
+    assert job.posts_found == 1
+    assert job.posts_new == 1
+    assert metric.score == 10

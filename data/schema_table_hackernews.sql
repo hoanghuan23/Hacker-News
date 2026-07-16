@@ -4,21 +4,6 @@
 
 PRAGMA foreign_keys = ON;
 
--- Lưu lịch sử chạy các tác vụ định kỳ
-CREATE TABLE task_logs (
-    id INTEGER PRIMARY KEY,
-    task_name VARCHAR(100) NOT NULL,
-    status VARCHAR(20) CHECK (status IN ('running', 'done', 'failed')),
-    started_at DATETIME,
-    completed_at DATETIME,
-    duration_seconds FLOAT,
-    items_processed INTEGER DEFAULT 0,
-    errors_count INTEGER DEFAULT 0,
-    error_message TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX idx_task_logs_name_date ON task_logs (task_name, created_at);
-
 -- Nguồn Hacker News cần theo dõi
 -- source_type:
 --   topstories/newstories/beststories/askstories/showstories/jobstories: lấy từ Firebase API
@@ -201,7 +186,7 @@ CREATE TABLE pipeline_jobs (
     id INTEGER PRIMARY KEY,
 
     job_type VARCHAR(30) NOT NULL DEFAULT 'scrape_posts'
-        CHECK (job_type IN ('scrape_posts', 'update_metrics', 'scrape_comments', 'analytics')),
+        CHECK (job_type IN ('scrape_posts', 'scrape_new_posts', 'update_metrics', 'scrape_comments', 'analytics')),
 
     source_id INTEGER REFERENCES sources(id) ON DELETE SET NULL,
 

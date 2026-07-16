@@ -1,36 +1,17 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
 from app.database import Base
 
 
-class TaskLog(Base):
-    __tablename__ = "task_logs"
-    __table_args__ = (
-        CheckConstraint("status IN ('running', 'done', 'failed')", name="ck_task_logs_status"),
-        Index("idx_task_logs_name_date", "task_name", "created_at"),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    task_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    status: Mapped[str | None] = mapped_column(String(20))
-    started_at: Mapped[datetime | None] = mapped_column(DateTime)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime)
-    duration_seconds: Mapped[float | None] = mapped_column(Float)
-    items_processed: Mapped[int] = mapped_column(Integer, default=0)
-    errors_count: Mapped[int] = mapped_column(Integer, default=0)
-    error_message: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.current_timestamp())
-
-
 class PipelineJob(Base):
     __tablename__ = "pipeline_jobs"
     __table_args__ = (
         CheckConstraint(
-            "job_type IN ('scrape_posts', 'update_metrics', 'scrape_comments', 'analytics')",
+            "job_type IN ('scrape_posts', 'scrape_new_posts', 'update_metrics', 'scrape_comments', 'analytics')",
             name="ck_pipeline_jobs_job_type",
         ),
         CheckConstraint("status IN ('pending', 'running', 'done', 'failed')", name="ck_pipeline_jobs_status"),

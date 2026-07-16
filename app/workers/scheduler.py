@@ -75,7 +75,7 @@ def scrape_due_sources(
     result = {"sources_total": len(sources), "sources_scraped": 0, "sources_failed": 0, "posts_found": 0}
 
     for source in sources:
-        job = start_pipeline_job(db, "scrape_posts", source_id=source.id, started_at=scan_time)
+        job = start_pipeline_job(db, "scrape_new_posts", source_id=source.id, started_at=scan_time)
         try:
             latest_posted_at = _get_latest_source_posted_at(db, source.id)
             items = fetch_recent_source_items(

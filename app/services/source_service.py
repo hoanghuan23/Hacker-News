@@ -11,6 +11,7 @@ from app.models.source import Source
 from app.schemas.source import SOURCE_API_PATH_MAP, SourceCreate, SourceUpdate
 from app.services.hackernews_ingestion import fetch_recent_source_items, upsert_source_posts
 from app.services.hackernews_client import HackerNewsClient
+from app.services.pipeline_service import finish_pipeline_job, start_pipeline_job
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,17 @@ def create_source(
         db.rollback()
         logger.info("Duplicate source rejected by database: %s", exc)
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Source already exists") from exc
-    upsert_source_posts(db, source, items)
+    job = start_pipeline_job(db, "scrape_posts", source_id=source.id)
+    posts_updated = upsert_source_posts(db, source, items, job_id=job.id)
+    finish_pipeline_job(
+        job,
+        "done",
+        posts_found=len(items),
+        posts_new=posts_updated,
+        items_total=len(items),
+        items_updated=posts_updated,
+    )
+    db.commit()
     return source_crud.refresh_next_scrape_from_last_scraped(db, source)
 
 

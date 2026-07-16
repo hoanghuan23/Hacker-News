@@ -143,7 +143,7 @@ def test_scheduler_tick_scrapes_due_sources_and_skips_null_next_scrape():
     assert due_source.next_scrape == (now + timedelta(minutes=25)).replace(tzinfo=None)
     assert null_source.next_scrape is None
     post = db.scalars(select(Post).where(Post.hn_post_id == 10)).one()
-    source_job = db.scalars(select(PipelineJob).where(PipelineJob.job_type == "scrape_posts")).one()
+    source_job = db.scalars(select(PipelineJob).where(PipelineJob.job_type == "scrape_new_posts")).one()
     metric = db.scalars(select(PostMetric).where(PostMetric.post_id == post.id)).one()
     assert post.title == "Due source story"
     assert source_job.source_id == due_source.id
@@ -261,7 +261,7 @@ def test_scheduler_tick_retries_source_after_hackernews_failure():
     )
 
     db.refresh(source)
-    source_job = db.scalars(select(PipelineJob).where(PipelineJob.job_type == "scrape_posts")).one()
+    source_job = db.scalars(select(PipelineJob).where(PipelineJob.job_type == "scrape_new_posts")).one()
     log = db.scalars(select(PipelineLog).where(PipelineLog.job_id == source_job.id)).one()
     assert result["sources"]["sources_failed"] == 1
     assert source.next_scrape == (now + timedelta(minutes=50)).replace(tzinfo=None)
