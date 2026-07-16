@@ -49,6 +49,7 @@ def test_calculate_metric_tier_boundaries():
 
 def test_upsert_source_posts_sets_metric_tier_and_next_update():
     db = make_session()
+    now = datetime.now(timezone.utc)
     source = Source(source_type="news", api_path="topstories.json")
     db.add(source)
     db.commit()
@@ -62,7 +63,7 @@ def test_upsert_source_posts_sets_metric_tier_and_next_update():
                 "id": 123,
                 "type": "story",
                 "title": "Example",
-                "time": 1_700_000_000,
+                "time": int((now - timedelta(hours=1)).timestamp()),
                 "score": 120,
                 "descendants": 0,
             }
@@ -76,6 +77,7 @@ def test_upsert_source_posts_sets_metric_tier_and_next_update():
     assert metric.comment_count == 0
     assert post.metric_tier == "high"
     assert post.last_metric_update is not None
+    assert post.tracking_until == post.posted_at + timedelta(hours=24)
     assert post.next_metric_update == post.last_metric_update + timedelta(
         minutes=POST_METRIC_INTERVAL_MINUTES["high"]
     )
@@ -86,21 +88,21 @@ def test_update_due_post_metrics_updates_only_due_posts_and_recomputes_tier():
     now = datetime.now(timezone.utc)
     due_post = Post(
         hn_post_id=1,
-        posted_at=now - timedelta(days=1),
+        posted_at=now - timedelta(hours=23),
         is_tracked=True,
         next_metric_update=now - timedelta(minutes=1),
         metric_tier="very_low",
     )
     future_post = Post(
         hn_post_id=2,
-        posted_at=now - timedelta(days=1),
+        posted_at=now - timedelta(hours=23),
         is_tracked=True,
         next_metric_update=now + timedelta(hours=1),
         metric_tier="very_low",
     )
     missing_post = Post(
         hn_post_id=3,
-        posted_at=now - timedelta(days=1),
+        posted_at=now - timedelta(hours=23),
         is_tracked=True,
         next_metric_update=now - timedelta(minutes=1),
         metric_tier="very_low",
@@ -116,6 +118,7 @@ def test_update_due_post_metrics_updates_only_due_posts_and_recomputes_tier():
                 3: requests.RequestException("temporary failure"),
             }
         ),
+        now=now,
     )
 
     assert result == {"items_total": 2, "items_updated": 1, "items_failed": 1}
@@ -140,3 +143,29 @@ def test_update_due_post_metrics_updates_only_due_posts_and_recomputes_tier():
     assert job.items_failed == 1
     assert log.log_level == "ERROR"
     assert log.error_type == "RequestException"
+
+
+def test_update_due_post_metrics_skips_posts_older_than_24_hours():
+    db = make_session()
+    now = datetime.now(timezone.utc)
+    old_post = Post(
+        hn_post_id=4,
+        posted_at=now - timedelta(hours=24, minutes=1),
+        is_tracked=True,
+        tracking_until=now - timedelta(minutes=1),
+        next_metric_update=now - timedelta(minutes=1),
+        metric_tier="very_low",
+    )
+    db.add(old_post)
+    db.commit()
+
+    result = update_due_post_metrics(
+        db,
+        client=FakeHackerNewsClient({4: {"id": 4, "type": "story", "score": 300, "descendants": 0}}),
+        now=now,
+    )
+
+    db.refresh(old_post)
+    assert result == {"items_total": 0, "items_updated": 0, "items_failed": 0}
+    assert old_post.last_metric_update is None
+    assert db.scalars(select(PostMetric).where(PostMetric.post_id == old_post.id)).first() is None

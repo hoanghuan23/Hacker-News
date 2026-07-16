@@ -145,6 +145,7 @@ def run_scheduler_tick(
         db,
         client=client,
         limit=metrics_limit or settings.METRICS_UPDATE_LIMIT,
+        now=scan_time,
     )
     source_result = scrape_due_sources(
         db,

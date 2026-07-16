@@ -1,8 +1,8 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import requests
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models.metric import PostMetric
@@ -19,6 +19,13 @@ POST_METRIC_INTERVAL_MINUTES = {
     "low": 60,
     "very_low": 120,
 }
+POST_METRIC_TRACKING_WINDOW_HOURS = 24
+
+
+def _as_utc_naive(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def calculate_metric_tier(score: int, comment_count: int) -> str:
@@ -39,24 +46,41 @@ def calculate_next_metric_update(now: datetime, tier: str) -> datetime:
     return now + timedelta(minutes=interval_minutes)
 
 
+def calculate_metric_tracking_until(posted_at: datetime) -> datetime:
+    return _as_utc_naive(posted_at) + timedelta(hours=POST_METRIC_TRACKING_WINDOW_HOURS)
+
+
 def apply_metric_schedule(post: Post, score: int, comment_count: int, recorded_at: datetime) -> None:
+    recorded_at = _as_utc_naive(recorded_at)
     tier = calculate_metric_tier(score, comment_count)
+    tracking_until = calculate_metric_tracking_until(post.posted_at)
+    next_metric_update = calculate_next_metric_update(recorded_at, tier)
+
     post.metric_tier = tier
     post.last_metric_update = recorded_at
-    post.next_metric_update = calculate_next_metric_update(recorded_at, tier)
+    post.tracking_until = tracking_until
+    post.is_tracked = recorded_at <= tracking_until
+    post.next_metric_update = min(next_metric_update, tracking_until) if post.is_tracked else None
 
 
 def update_due_post_metrics(
     db: Session,
     client: HackerNewsClient | None = None,
     limit: int = 100,
+    now: datetime | None = None,
 ) -> dict[str, int]:
-    now = utc_now()
+    now = _as_utc_naive(now or utc_now())
+    tracking_cutoff = now - timedelta(hours=POST_METRIC_TRACKING_WINDOW_HOURS)
     job = start_pipeline_job(db, "update_metrics", started_at=now)
     hn_client = client or HackerNewsClient()
     statement = (
         select(Post)
-        .where(Post.is_tracked.is_(True), Post.next_metric_update <= now)
+        .where(
+            Post.is_tracked.is_(True),
+            Post.next_metric_update <= now,
+            Post.posted_at >= tracking_cutoff,
+            or_(Post.tracking_until.is_(None), Post.tracking_until >= now),
+        )
         .order_by(Post.next_metric_update, Post.id)
         .limit(limit)
     )

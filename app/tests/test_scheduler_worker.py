@@ -53,14 +53,14 @@ def test_scheduler_tick_updates_due_post_metrics_and_skips_future_posts():
     now = datetime.now(timezone.utc)
     due_post = Post(
         hn_post_id=1,
-        posted_at=now - timedelta(days=1),
+        posted_at=now - timedelta(hours=23),
         is_tracked=True,
         next_metric_update=now - timedelta(minutes=1),
         metric_tier="very_low",
     )
     future_post = Post(
         hn_post_id=2,
-        posted_at=now - timedelta(days=1),
+        posted_at=now - timedelta(hours=23),
         is_tracked=True,
         next_metric_update=now + timedelta(hours=1),
         metric_tier="very_low",
