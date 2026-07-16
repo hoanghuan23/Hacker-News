@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.models.metric import PostMetric
 from app.models.post import Post
+from app.models.post import PostSource
+from app.models.source import Source
 from app.services.pipeline_service import add_pipeline_log, finish_pipeline_job, start_pipeline_job
 from app.services.hackernews_client import HackerNewsClient
 from app.utils.datetime_utils import utc_now
@@ -63,29 +65,53 @@ def apply_metric_schedule(post: Post, score: int, comment_count: int, recorded_a
     post.next_metric_update = min(next_metric_update, tracking_until) if post.is_tracked else None
 
 
+def _due_metric_filters(now: datetime) -> tuple[Any, ...]:
+    tracking_cutoff = now - timedelta(hours=POST_METRIC_TRACKING_WINDOW_HOURS)
+    return (
+        Post.is_tracked.is_(True),
+        Post.next_metric_update <= now,
+        Post.posted_at >= tracking_cutoff,
+        or_(Post.tracking_until.is_(None), Post.tracking_until >= now),
+    )
+
+
+def get_sources_with_due_post_metrics(db: Session, limit: int, now: datetime | None = None) -> list[Source]:
+    now = _as_utc_naive(now or utc_now())
+    statement = (
+        select(Source)
+        .join(PostSource, PostSource.source_id == Source.id)
+        .join(Post, Post.id == PostSource.post_id)
+        .where(
+            Source.is_active.is_(True),
+            Source.is_accessible.is_(True),
+            *_due_metric_filters(now),
+        )
+        .distinct()
+        .order_by(Source.id)
+        .limit(limit)
+    )
+    return list(db.scalars(statement).all())
+
+
 def update_due_post_metrics(
     db: Session,
     client: HackerNewsClient | None = None,
     limit: int = 100,
     now: datetime | None = None,
+    source_id: int | None = None,
 ) -> dict[str, int]:
     now = _as_utc_naive(now or utc_now())
-    tracking_cutoff = now - timedelta(hours=POST_METRIC_TRACKING_WINDOW_HOURS)
-    job = start_pipeline_job(db, "update_metrics", started_at=now)
-    hn_client = client or HackerNewsClient()
-    statement = (
-        select(Post)
-        .where(
-            Post.is_tracked.is_(True),
-            Post.next_metric_update <= now,
-            Post.posted_at >= tracking_cutoff,
-            or_(Post.tracking_until.is_(None), Post.tracking_until >= now),
-        )
-        .order_by(Post.next_metric_update, Post.id)
-        .limit(limit)
-    )
+    statement = select(Post)
+    if source_id is not None:
+        statement = statement.join(PostSource, PostSource.post_id == Post.id).where(PostSource.source_id == source_id)
+    statement = statement.where(*_due_metric_filters(now)).order_by(Post.next_metric_update, Post.id).limit(limit)
     posts = list(db.scalars(statement).all())
     result = {"items_total": len(posts), "items_updated": 0, "items_failed": 0}
+    if not posts:
+        return result
+
+    job = start_pipeline_job(db, "update_metrics", source_id=source_id, started_at=now)
+    hn_client = client or HackerNewsClient()
 
     try:
         for post in posts:
@@ -96,6 +122,7 @@ def update_due_post_metrics(
                 add_pipeline_log(
                     db,
                     job_id=job.id,
+                    source_id=source_id,
                     message=f"Metric update request failed for post_id={post.id}",
                     error_type=type(exc).__name__,
                     error_details=str(exc),
@@ -106,6 +133,7 @@ def update_due_post_metrics(
                 add_pipeline_log(
                     db,
                     job_id=job.id,
+                    source_id=source_id,
                     message=f"Metric update returned invalid item for post_id={post.id}",
                     log_level="WARNING",
                     error_details=repr(item),
@@ -120,6 +148,7 @@ def update_due_post_metrics(
                 add_pipeline_log(
                     db,
                     job_id=job.id,
+                    source_id=source_id,
                     message=f"Metric update skipped deleted/dead post_id={post.id}",
                     log_level="WARNING",
                     error_details=repr(item),
@@ -151,6 +180,7 @@ def update_due_post_metrics(
             add_pipeline_log(
                 db,
                 job_id=job.id,
+                source_id=source_id,
                 message="Metric update job failed",
                 error_type=type(exc).__name__,
                 error_details=str(exc),

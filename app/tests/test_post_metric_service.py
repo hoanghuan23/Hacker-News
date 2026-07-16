@@ -8,7 +8,7 @@ import app.models  # noqa: F401
 from app.database import Base
 from app.models.metric import PostMetric
 from app.models.pipeline import PipelineJob, PipelineLog
-from app.models.post import Post
+from app.models.post import Post, PostSource
 from app.models.source import Source
 from app.services.hackernews_ingestion import upsert_source_posts
 from app.services.post_metric_service import (
@@ -145,6 +145,56 @@ def test_update_due_post_metrics_updates_only_due_posts_and_recomputes_tier():
     assert log.error_type == "RequestException"
 
 
+def test_update_due_post_metrics_can_run_for_one_source():
+    db = make_session()
+    now = datetime.now(timezone.utc)
+    source = Source(source_type="news", api_path="topstories.json")
+    other_source = Source(source_type="best", api_path="beststories.json")
+    source_post = Post(
+        hn_post_id=10,
+        posted_at=now - timedelta(hours=1),
+        is_tracked=True,
+        next_metric_update=now - timedelta(minutes=1),
+        metric_tier="very_low",
+    )
+    other_post = Post(
+        hn_post_id=11,
+        posted_at=now - timedelta(hours=1),
+        is_tracked=True,
+        next_metric_update=now - timedelta(minutes=1),
+        metric_tier="very_low",
+    )
+    db.add_all([source, other_source, source_post, other_post])
+    db.commit()
+    db.add_all(
+        [
+            PostSource(post_id=source_post.id, source_id=source.id),
+            PostSource(post_id=other_post.id, source_id=other_source.id),
+        ]
+    )
+    db.commit()
+
+    result = update_due_post_metrics(
+        db,
+        client=FakeHackerNewsClient(
+            {
+                10: {"id": 10, "type": "story", "score": 300, "descendants": 0},
+                11: {"id": 11, "type": "story", "score": 300, "descendants": 0},
+            }
+        ),
+        now=now,
+        source_id=source.id,
+    )
+
+    db.refresh(source_post)
+    db.refresh(other_post)
+    job = db.scalars(select(PipelineJob).where(PipelineJob.job_type == "update_metrics")).one()
+    assert result == {"items_total": 1, "items_updated": 1, "items_failed": 0}
+    assert source_post.metric_tier == "viral"
+    assert other_post.metric_tier == "very_low"
+    assert job.source_id == source.id
+
+
 def test_update_due_post_metrics_skips_posts_older_than_24_hours():
     db = make_session()
     now = datetime.now(timezone.utc)
@@ -169,3 +219,27 @@ def test_update_due_post_metrics_skips_posts_older_than_24_hours():
     assert result == {"items_total": 0, "items_updated": 0, "items_failed": 0}
     assert old_post.last_metric_update is None
     assert db.scalars(select(PostMetric).where(PostMetric.post_id == old_post.id)).first() is None
+    assert db.scalars(select(PipelineJob).where(PipelineJob.job_type == "update_metrics")).first() is None
+
+
+def test_update_due_post_metrics_does_not_create_job_without_due_posts():
+    db = make_session()
+    now = datetime.now(timezone.utc)
+    future_post = Post(
+        hn_post_id=5,
+        posted_at=now - timedelta(hours=1),
+        is_tracked=True,
+        next_metric_update=now + timedelta(minutes=30),
+        metric_tier="very_low",
+    )
+    db.add(future_post)
+    db.commit()
+
+    result = update_due_post_metrics(
+        db,
+        client=FakeHackerNewsClient({5: {"id": 5, "type": "story", "score": 300, "descendants": 0}}),
+        now=now,
+    )
+
+    assert result == {"items_total": 0, "items_updated": 0, "items_failed": 0}
+    assert db.scalars(select(PipelineJob).where(PipelineJob.job_type == "update_metrics")).first() is None

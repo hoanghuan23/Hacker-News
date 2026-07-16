@@ -51,6 +51,14 @@ def make_session() -> Session:
 def test_scheduler_tick_updates_due_post_metrics_and_skips_future_posts():
     db = make_session()
     now = datetime.now(timezone.utc)
+    source = Source(
+        source_type="news",
+        api_path="topstories.json",
+        is_active=True,
+        is_accessible=True,
+        max_days_old=1,
+        next_scrape=now + timedelta(hours=1),
+    )
     due_post = Post(
         hn_post_id=1,
         posted_at=now - timedelta(hours=23),
@@ -65,7 +73,14 @@ def test_scheduler_tick_updates_due_post_metrics_and_skips_future_posts():
         next_metric_update=now + timedelta(hours=1),
         metric_tier="very_low",
     )
-    db.add_all([due_post, future_post])
+    db.add_all([source, due_post, future_post])
+    db.commit()
+    db.add_all(
+        [
+            PostSource(post_id=due_post.id, source_id=source.id),
+            PostSource(post_id=future_post.id, source_id=source.id),
+        ]
+    )
     db.commit()
 
     result = run_scheduler_tick(
@@ -83,9 +98,50 @@ def test_scheduler_tick_updates_due_post_metrics_and_skips_future_posts():
     metric_job = db.scalars(select(PipelineJob).where(PipelineJob.job_type == "update_metrics")).one()
     assert metric.score == 300
     assert metric.job_id == metric_job.id
+    assert metric_job.source_id == source.id
     assert metric_job.status == "done"
     assert metric_job.items_total == 1
     assert metric_job.items_updated == 1
+
+
+def test_scheduler_tick_does_not_create_metric_job_without_due_posts_or_sources():
+    db = make_session()
+    now = datetime.now(timezone.utc)
+    future_post = Post(
+        hn_post_id=2,
+        posted_at=now - timedelta(hours=1),
+        is_tracked=True,
+        next_metric_update=now + timedelta(hours=1),
+        metric_tier="very_low",
+    )
+    future_source = Source(
+        source_type="news",
+        api_path="topstories.json",
+        is_active=True,
+        is_accessible=True,
+        max_days_old=1,
+        next_scrape=now + timedelta(hours=1),
+    )
+    db.add_all([future_post, future_source])
+    db.commit()
+
+    result = run_scheduler_tick(
+        db,
+        client=FakeHackerNewsClient(
+            items={2: {"id": 2, "type": "story", "score": 300, "descendants": 0}},
+            story_ids={"topstories.json": [2]},
+        ),
+        now=now,
+    )
+
+    assert result["metrics"] == {"items_total": 0, "items_updated": 0, "items_failed": 0}
+    assert result["sources"] == {
+        "sources_total": 0,
+        "sources_scraped": 0,
+        "sources_failed": 0,
+        "posts_found": 0,
+    }
+    assert db.scalars(select(PipelineJob)).first() is None
 
 
 def test_scheduler_tick_scrapes_due_sources_and_skips_null_next_scrape():

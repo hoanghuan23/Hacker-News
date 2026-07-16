@@ -16,7 +16,7 @@ from app.models.source import Source
 from app.services.hackernews_client import HackerNewsClient
 from app.services.hackernews_ingestion import fetch_recent_source_items, upsert_source_posts
 from app.services.pipeline_service import add_pipeline_log, finish_pipeline_job, start_pipeline_job
-from app.services.post_metric_service import update_due_post_metrics
+from app.services.post_metric_service import get_sources_with_due_post_metrics, update_due_post_metrics
 from app.utils.datetime_utils import utc_now
 
 logger = logging.getLogger(__name__)
@@ -141,12 +141,22 @@ def run_scheduler_tick(
     source_limit: int | None = None,
 ) -> dict[str, Any]:
     scan_time = now or utc_now()
-    metric_result = update_due_post_metrics(
+    metric_result = {"items_total": 0, "items_updated": 0, "items_failed": 0}
+    metric_sources = get_sources_with_due_post_metrics(
         db,
-        client=client,
-        limit=metrics_limit or settings.METRICS_UPDATE_LIMIT,
+        limit=source_limit or settings.SOURCE_SCRAPE_LIMIT,
         now=scan_time,
     )
+    for source in metric_sources:
+        source_metric_result = update_due_post_metrics(
+            db,
+            client=client,
+            limit=metrics_limit or settings.METRICS_UPDATE_LIMIT,
+            now=scan_time,
+            source_id=source.id,
+        )
+        for key, value in source_metric_result.items():
+            metric_result[key] += value
     source_result = scrape_due_sources(
         db,
         client=client,
